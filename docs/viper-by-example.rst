@@ -119,10 +119,11 @@ design patterns and features of the Viper language.
 And of course, no smart contract tutorial is complete without a note on
 security.
 
-.. note:: It's always important to keep security in mind when designing a smart
-contract. As any application becomes more complex, the greater the potential for
-introducing new risks. Thus, it's always good practice to keep contracts as
-readable and simple as possible.
+.. note:: 
+  It's always important to keep security in mind when designing a smart
+  contract. As any application becomes more complex, the greater the potential for
+  introducing new risks. Thus, it's always good practice to keep contracts as
+  readable and simple as possible.
 
 Whenever you're ready, let's turn it up a notch in the next example.
 
@@ -164,7 +165,7 @@ logic. Let's break down this contract bit by bit.
 
 .. literalinclude:: ../examples/safe_remote_purchase/safe_remote_purchase.v.py
   :language: python
-  :lines: 10-13
+  :lines: 16-19
 
 Like the other contracts, we begin by declaring our global variables public with
 their respective datatypes. Remember that the ``public`` function allows the
@@ -172,7 +173,7 @@ variables to be *readable* by an external caller, but not *writeable*.
 
 .. literalinclude:: ../examples/safe_remote_purchase/safe_remote_purchase.v.py
   :language: python
-  :lines: 18-23
+  :lines: 24-31
 
 With a ``@payable`` decorator on the constructor, the contract creator will be
 required to make an initial deposit equal to twice the item's ``value`` to
@@ -186,10 +187,10 @@ in the contract variable ``self.value`` and saves the contract creator into
 
 .. literalinclude:: ../examples/safe_remote_purchase/safe_remote_purchase.v.py
   :language: python
-  :lines: 25-28
+  :lines: 33-38
 
 The ``abort()`` method is a method only callable by the seller and while the
-contract is still ``unlocked`` - meaning it is callable only prior to any buyer
+contract is still ``unlocked``—meaning it is callable only prior to any buyer
 making a purchase. As we will see in the ``purchase()`` method that when
 a buyer calls the ``purchase()`` method and sends a valid amount to the contract,
 the contract will be locked and the seller will no longer be able to call
@@ -201,23 +202,23 @@ subsequently destroys the contract.
 
 .. literalinclude:: ../examples/safe_remote_purchase/safe_remote_purchase.v.py
   :language: python
-  :lines: 30-35
+  :lines: 40-46
 
 Like the constructor, the ``purchase()`` method has a ``@payable`` decorator,
 meaning it can be called with a payment. For the buyer to make a valid
-purchase, we must first ``assert`` that the contract's unlocked property is
-``False`` and that the amount sent is equal to twice the item's value. We then
+purchase, we must first ``assert`` that the contract's ``unlocked`` property is
+``True`` and that the amount sent is equal to twice the item's value. We then
 set the buyer to the ``msg.sender`` and lock the contract. At this point, the
 contract has a balance equal to 4 times the item value and the seller must
 send the item to the buyer.
 
 .. literalinclude:: ../examples/safe_remote_purchase/safe_remote_purchase.v.py
   :language: python
-  :lines: 37-41
+  :lines: 48-55
 
 Finally, upon the buyer's receipt of the item, the buyer can confirm their
 receipt by calling the ``received()`` method to distribute the funds as
-intended - the seller receives 3/4 of the contract balance and the buyer
+intended—where the seller receives 3/4 of the contract balance and the buyer
 receives 1/4.
 
 By calling ``received()``, we begin by checking that the contract is indeed
@@ -271,9 +272,9 @@ This struct contains each participant's public address and their respective
 value contributed to the fund. The key corresponding to each struct in the
 mapping will be represented by the variable ``nextFunderIndex`` which is
 incremented with each additional contributing participant. Variables initialized
-with ``num`` type without an explicit value, such as ``nextFunderIndex``,
+with the ``num`` type without an explicit value, such as ``nextFunderIndex``,
 defaults to ``0``. The ``beneficiary`` will be the final receiver of the funds
-once the crowdfunding period is over - as determined by the ``deadline`` and
+once the crowdfunding period is over—as determined by the ``deadline`` and
 ``timelimit`` variables. The ``goal`` variable is the target total contribution
 of all participants. ``refundIndex`` is a variable for bookkeeping purposes in
 order to avoid gas limit issues in the scenario of a refund.
@@ -314,10 +315,11 @@ period is over and that the balance has reached/passed its set goal. If those
 two conditions pass, the contract calls the ``selfdestruct()`` function and
 sends the collected funds to the beneficiary.
 
-.. note:: Notice that we have access to the total amount sent to the contract by
-calling ``self.balance``, a variable we never explicitly set. Similar to ``msg``
-and ``block``, ``self.balance`` is a built-in variable thats available in all
-Viper contracts.
+.. note:: 
+  Notice that we have access to the total amount sent to the contract by
+  calling ``self.balance``, a variable we never explicitly set. Similar to ``msg``
+  and ``block``, ``self.balance`` is a built-in variable thats available in all
+  Viper contracts.
 
 We can finalize the campaign if all goes well, but what happens if the
 crowdfunding campaign isn't successful? We're going to need a way to refund
@@ -344,7 +346,7 @@ Voting
 
 In this contract, we will implement a system for participants to vote on a list
 of proposals. The chairperson of the contract will be able to give each
-participant the right to vote and each participant may choose to vote or
+participant the right to vote, and each participant may choose to vote, or
 delegate their vote to another voter. Finally, a winning proposal will be
 determined upon calling the ``winning_proposals()`` method, which iterates through
 all the proposals and returns the one with the greatest number of votes.
@@ -359,7 +361,7 @@ section by section. Let’s begin!
 
 .. literalinclude:: ../examples/voting/ballot.v.py
   :language: python
-  :lines: 3-21
+  :lines: 3-25
 
 The variable ``voters`` is initialized as a mapping where the key is
 the voter’s public address and the value is a struct describing the

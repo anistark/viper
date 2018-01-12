@@ -17,6 +17,7 @@ from .parser_utils import (
 )
 from viper.utils import (
     MemoryPositions,
+    SizeLimits,
     bytes_to_int,
     string_to_bytes,
     DECIMAL_DIVISOR,
@@ -28,7 +29,6 @@ from viper.types import (
     ByteArrayType,
     ListType,
     MappingType,
-    MixedType,
     NullType,
     StructType,
     TupleType,
@@ -78,12 +78,12 @@ class Expr(object):
     def number(self):
         orignum = get_original_if_0x_prefixed(self.expr, self.context)
         if orignum is None and isinstance(self.expr.n, int):
-            if not (-2**127 + 1 <= self.expr.n <= 2**127 - 1):
+            if not (SizeLimits.MINNUM <= self.expr.n <= SizeLimits.MAXNUM):
                 raise InvalidLiteralException("Number out of range: " + str(self.expr.n), self.expr)
             return LLLnode.from_list(self.expr.n, typ=BaseType('num', None), pos=getpos(self.expr))
         elif isinstance(self.expr.n, float):
             numstring, num, den = get_number_as_fraction(self.expr, self.context)
-            if not (-2**127 * den < num < 2**127 * den):
+            if not (SizeLimits.MINNUM * den < num < SizeLimits.MAXNUM * den):
                 raise InvalidLiteralException("Number out of range: " + numstring, self.expr)
             if DECIMAL_DIVISOR % den:
                 raise InvalidLiteralException("Too many decimal places: " + numstring, self.expr)
@@ -279,13 +279,19 @@ class Expr(object):
                 o = LLLnode.from_list(['smod', left, ['mul', ['clamp_nonzero', right], DECIMAL_DIVISOR]],
                                       typ=BaseType('decimal', new_unit), pos=getpos(self.expr))
             elif ltyp == 'num' and rtyp == 'decimal':
-                o = LLLnode.from_list(['smod', ['mul', left, DECIMAL_DIVISOR], right],
+                o = LLLnode.from_list(['smod', ['mul', left, DECIMAL_DIVISOR], ['clamp_nonzero', right]],
                                       typ=BaseType('decimal', new_unit), pos=getpos(self.expr))
         elif isinstance(self.expr.op, ast.Pow):
             if left.typ.positional or right.typ.positional:
                 raise TypeMismatchException("Cannot use positional values as exponential arguments!", self.expr)
-            new_unit = combine_units(left.typ.unit, right.typ.unit)
+            if right.typ.unit:
+                raise TypeMismatchException("Cannot use unit values as exponents", self.expr)
+            if ltyp != 'num' and isinstance(self.expr.right, ast.Name):
+                raise TypeMismatchException("Cannot use dynamic values as exponents, for unit base types", self.expr)
             if ltyp == rtyp == 'num':
+                new_unit = left.typ.unit
+                if left.typ.unit and not isinstance(self.expr.right, ast.Name):
+                    new_unit = {left.typ.unit.copy().popitem()[0]: self.expr.right.n}
                 o = LLLnode.from_list(['exp', left, right], typ=BaseType('num', new_unit), pos=getpos(self.expr))
             else:
                 raise TypeMismatchException('Only whole number exponents are supported', self.expr)
@@ -433,14 +439,22 @@ class Expr(object):
         from viper.functions import (
             dispatch_table,
         )
-        if isinstance(self.expr.func, ast.Name) and self.expr.func.id in dispatch_table:
-            return dispatch_table[self.expr.func.id](self.expr, self.context)
+        if isinstance(self.expr.func, ast.Name):
+            function_name = self.expr.func.id
+            if function_name in dispatch_table:
+                return dispatch_table[function_name](self.expr, self.context)
+            else:
+                err_msg = "Not a top-level function: {}".format(function_name)
+                if function_name in self.context.sigs['self']:
+                    err_msg += ". Did you mean self.{}?".format(function_name)
+                raise StructureException(err_msg, self.expr)
         elif isinstance(self.expr.func, ast.Attribute) and isinstance(self.expr.func.value, ast.Name) and self.expr.func.value.id == "self":
             method_name = self.expr.func.attr
             if method_name not in self.context.sigs['self']:
                 raise VariableDeclarationException("Function not declared yet (reminder: functions cannot "
                                                    "call functions later in code than themselves): %s" % self.expr.func.attr)
             sig = self.context.sigs['self'][self.expr.func.attr]
+            add_gas = self.context.sigs['self'][method_name].gas  # gas of call
             inargs, inargsize = pack_arguments(sig, [Expr(arg, self.context).lll_node for arg in self.expr.args], self.context)
             output_placeholder = self.context.new_placeholder(typ=sig.output_type)
             if isinstance(sig.output_type, BaseType):
@@ -453,11 +467,24 @@ class Expr(object):
                                         ['assert', ['call', ['gas'], ['address'], 0,
                                                         inargs, inargsize,
                                                         output_placeholder, get_size_of_type(sig.output_type) * 32]],
-                                        returner], typ=sig.output_type, location='memory', pos=getpos(self.expr))
+                                        returner], typ=sig.output_type, location='memory',
+                                        pos=getpos(self.expr), add_gas_estimate=add_gas, annotation='Internal Call: %s' % method_name)
             o.gas += sig.gas
             return o
         elif isinstance(self.expr.func, ast.Attribute) and isinstance(self.expr.func.value, ast.Call):
-            return external_contract_call_expr(self.expr, self.context)
+            contract_name = self.expr.func.value.func.id
+            contract_address = Expr.parse_value_expr(self.expr.func.value.args[0], self.context)
+            return external_contract_call_expr(self.expr, self.context, contract_name, contract_address)
+        elif isinstance(self.expr.func.value, ast.Attribute) and self.expr.func.value.attr in self.context.sigs:
+            contract_name = self.expr.func.value.attr
+            var = self.context.globals[self.expr.func.value.attr]
+            contract_address = unwrap_location(LLLnode.from_list(var.pos, typ=var.typ, location='storage', pos=getpos(self.expr), annotation='self.' + self.expr.func.value.attr))
+            return external_contract_call_expr(self.expr, self.context, contract_name, contract_address)
+        elif isinstance(self.expr.func.value, ast.Attribute) and self.expr.func.value.attr in self.context.globals:
+            contract_name = self.context.globals[self.expr.func.value.attr].typ.unit
+            var = self.context.globals[self.expr.func.value.attr]
+            contract_address = unwrap_location(LLLnode.from_list(var.pos, typ=var.typ, location='storage', pos=getpos(self.expr), annotation='self.' + self.expr.func.value.attr))
+            return external_contract_call_expr(self.expr, self.context, contract_name, contract_address)
         else:
             raise StructureException("Unsupported operator: %r" % ast.dump(self.expr), self.expr)
 
@@ -470,8 +497,10 @@ class Expr(object):
             o.append(Expr(elt, self.context).lll_node)
             if not out_type:
                 out_type = o[-1].typ
-            elif len(o) > 1 and o[-1].typ != out_type:
-                out_type = MixedType()
+            previous_type = o[-1].typ.subtype.typ if hasattr(o[-1].typ, 'subtype') else o[-1].typ
+            current_type = out_type.subtype.typ if hasattr(out_type, 'subtype') else out_type
+            if len(o) > 1 and previous_type != current_type:
+                raise TypeMismatchException("Lists may only contain one type", self.expr)
         return LLLnode.from_list(["multi"] + o, typ=ListType(out_type, len(o)), pos=getpos(self.expr))
 
     def struct_literals(self):

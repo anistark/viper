@@ -1,16 +1,16 @@
 import pytest
-from pytest import raises
 
 from viper import compiler
-from viper.exceptions import TypeMismatchException
 
 
 valid_list = [
     """
+@public
 def foo() -> bytes <= 10:
     return "badminton"
     """,
     """
+@public
 def foo():
     x = "¡très bien!"
     """
